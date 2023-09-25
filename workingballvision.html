@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Find ping pong ball</title>
+  <style type="text/css">
+    canvas { border: 5px solid silver; background: transparent; }
+    #container {
+      margin: 0px auto;
+      width: 640px;
+      height: 480px;
+      border: 1px #333 solid;
+    }
+    #v {
+      width: 640px;
+      height: 480px;
+      background-color: #666;
+    }
+  </style>
+</head>
+<body onload="initialize();">
+  <form><input type="text" id="dbg" value="test"></form>
+  <div id="container" style="position:absolute; left:10px; top: 50px; touch-action:none;">
+    <video autoplay="true" id="v" width="640" height="480"></video>
+  </div>
+  <div style="position:absolute; left:10px; top: 50px; touch-action:none;">
+    <canvas id="c" width="640" height="480"></canvas>
+  </div>
+
+  <!-- Add a button to request serial access -->
+  <button onclick="requestSerialAccess()">Request Serial Access</button>
+
+  <script>
+    var vid, context, x, y;
+    var width = 640;
+    var height = 480;
+    var pendown;
+    var ctx;
+    var port;
+
+    function initialize() {
+      debg = document.getElementById("dbg"); //for debugging
+
+      // The source video.
+      vid = document.getElementById("v");
+      width = vid.width;
+      height = vid.height;
+
+      // The target canvas.
+      var canvas = document.getElementById("c");
+      ctx = canvas.getContext("2d");
+      ctx.strokeStyle = "red";
+      ctx.fillStyle = "red";
+      ctx.font = "40px Comic Sans MS";
+
+      navigator.mediaDevices.getUserMedia({ video: true })
+        .then(function (stream) {
+          startStream(stream);
+        })
+        .catch(function (error) {
+          console.error("Error accessing camera:", error);
+        });
+    }
+
+    function requestSerialAccess() {
+      try {
+        navigator.serial.requestPort()
+          .then(function (selectedPort) {
+            port = selectedPort;
+            return port.open({ baudRate: 9600 });
+          })
+          .then(function () {
+            console.log("Serial port opened.");
+          })
+          .catch(function (error) {
+            console.error("Error opening serial port:", error);
+          });
+      } catch (error) {
+        console.error("Serial API not available:", error);
+      }
+    }
+
+    function startStream(stream) {
+      vid.srcObject = stream;
+      vid.play();
+
+      requestAnimationFrame(draw);
+    }
+
+    function draw() {
+      var frame = readFrame();
+
+      if (frame) {
+        FindBall(frame.data);
+
+        ctx.putImageData(frame, 0, 0);
+
+        ctx.fillText("x = " + x + "  y= " + y, 20, 40);
+      }
+      debg.value = x;
+
+      // Wait for the next frame.
+      requestAnimationFrame(draw);
+    }
+
+    function readFrame() {
+      try {
+        ctx.drawImage(vid, 0, 0, width, height);
+      } catch (e) {
+        return null;
+      }
+
+      return ctx.getImageData(0, 0, width, height);
+    }
+
+    function FindBall(data) {
+      var len = data.length;
+      var hit = 0;
+
+      for (var i = 0, j = 0; j < len; i++, j += 4) {
+        if (data[j] > 200 && data[j + 1] > 200 && data[j + 2] > 200) {
+          data[j] = 255;     // Set red value to maximum
+          data[j + 1] = 255; // Set green value to maximum
+          data[j + 2] = 0;   // Set blue value to minimum
+          hit = j;
+        }
+      }
+      y = Math.floor(hit / (4 * width));
+      x = hit / 4 - width * y;
+
+      // Send the x value to the Arduino
+      sendXValueToArduino(x);
+    }
+
+    function sendXValueToArduino(x) {
+      if (port && port.writable) {
+        const encoder = new TextEncoder();
+        const dataToSend = encoder.encode(`x=${x}\n`);
+        port.write(dataToSend)
+          .then(function () {
+            console.log("Sent x value to Arduino:", x);
+          })
+          .catch(function (error) {
+            console.error("Error sending data to Arduino:", error);
+          });
+      }
+    }
+  </script>
+</body>
+</html>
